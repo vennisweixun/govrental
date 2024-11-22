@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Location with Map</title>
+    <!-- Leaflet.js CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding-top: 20px;
+        }
+        #map {
+            height: 500px;
+            width: 100%;
+        }
+        #location {
+            font-size: 20px;
+            margin: 10px 0;
+        }
+        .status-correct {
+            color: green;
+        }
+        .status-wrong {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Your Live Location with Map</h1>
+    <div id="location">Getting location...</div>
+    <div id="status"></div>
+    <div id="map"></div>
+
+    <!-- Leaflet.js JS -->
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+    var map, marker;
+    var tenantICNumber = "{{ tenant_ic }}";
+    var status = "{{ status }}";
+
+    // Custom markers for different statuses
+    var greenIcon = new L.Icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41]
+    });
+
+    var redIcon = new L.Icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41]
+    });
+
+    function getUrlParameter(name) {
+        name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+        var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+        var results = regex.exec(location.search);
+        return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+    }
+
+    function initMap(latitude, longitude) {
+        map = L.map('map').setView([latitude, longitude], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Initialize with red marker (default to wrong location)
+        marker = L.marker([latitude, longitude], {icon: redIcon}).addTo(map);
+    }
+
+    function updateMap(latitude, longitude, locationStatus) {
+        map.setView([latitude, longitude], 13);
+        
+        // Remove existing marker
+        if (marker) {
+            map.removeLayer(marker);
+        }
+
+        // Add new marker with appropriate color based on status
+        marker = L.marker([latitude, longitude], {
+            icon: locationStatus === 'Correct' ? greenIcon : redIcon
+        }).addTo(map);
+
+        // Update status display
+        const statusDiv = document.getElementById('status');
+        statusDiv.innerHTML = `Status: <span class="status-${locationStatus.toLowerCase()}">${locationStatus}</span>`;
+        if (locationStatus === 'Correct') {
+            statusDiv.innerHTML += ' - You are at the correct location!';
+        } else {
+            statusDiv.innerHTML += ' - Please move to your assigned stall location.';
+        }
+    }
+
+    if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(showPosition, showError, {
+            enableHighAccuracy: true,
+            timeout: 5000,
+            maximumAge: 0
+        });
+    } else {
+        document.getElementById("location").innerHTML = "Geolocation is not supported by this browser.";
+    }
+
+    function showPosition(position) {
+        var latitude = position.coords.latitude;
+        var longitude = position.coords.longitude;
+
+        document.getElementById("location").innerHTML = "Latitude: " + latitude + "<br>Longitude: " + longitude;
+
+        if (!map) {
+            initMap(latitude, longitude);
+        }
+
+        // Send location to the backend
+        fetch('/update_location', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                latitude: latitude,
+                longitude: longitude,
+                status: status,
+                tenant_ic_number: tenantICNumber,
+            }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Location updated:', data);
+            // Update map with the status from backend
+            updateMap(latitude, longitude, data.status);
+            
+            // Display distance information if available
+            if (data.distance) {
+                document.getElementById("status").innerHTML += `<br>Distance from stall: ${data.distance}`;
+            }
+        })
+        .catch(error => {
+            console.error('Error updating location:', error);
+            // If error, update map with red marker
+            updateMap(latitude, longitude, 'Wrong');
+        });
+    }
+
+    function showError(error) {
+        switch(error.code) {
+            case error.PERMISSION_DENIED:
+                document.getElementById("location").innerHTML = "User denied the request for Geolocation.";
+                break;
+            case error.POSITION_UNAVAILABLE:
+                document.getElementById("location").innerHTML = "Location information is unavailable.";
+                break;
+            case error.TIMEOUT:
+                document.getElementById("location").innerHTML = "The request to get user location timed out.";
+                break;
+            case error.UNKNOWN_ERROR:
+                document.getElementById("location").innerHTML = "An unknown error occurred.";
+                break;
+        }
+    }
+    </script>
+
+</body>
+</html>
